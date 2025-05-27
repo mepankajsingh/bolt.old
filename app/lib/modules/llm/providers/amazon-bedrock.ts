@@ -24,19 +24,7 @@ export default class AmazonBedrockProvider extends BaseProvider {
       name: 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
       label: 'Claude 3.7 Sonnet (Bedrock)',
       provider: 'AmazonBedrock',
-      maxTokenAllowed: 4096,
-    },
-	{
-      name: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
-      label: 'Claude 3.5 Sonnet v2 (Bedrock)',
-      provider: 'AmazonBedrock',
-      maxTokenAllowed: 4096,
-    },
-    {
-      name: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-      label: 'Claude 3.5 Sonnet (Bedrock)',
-      provider: 'AmazonBedrock',
-      maxTokenAllowed: 4096,
+      maxTokenAllowed: 128000,
     }
   ];
 
@@ -89,6 +77,7 @@ export default class AmazonBedrockProvider extends BaseProvider {
 
     const config = this._parseAndValidateConfig(apiKey);
     const bedrock = createAmazonBedrock(config);
+    headers: { 'anthropic-beta': 'output-128k-2025-02-19' },
 
     return bedrock(model);
   }
