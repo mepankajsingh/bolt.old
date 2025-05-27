@@ -68,6 +68,7 @@ export default class AmazonBedrockProvider extends BaseProvider {
       providerSettings: providerSettings?.[this.name],
       serverEnv: serverEnv as any,
       defaultBaseUrlKey: '',
+      headers: { 'anthropic-beta': 'output-128k-2025-02-19' },
       defaultApiTokenKey: 'AWS_BEDROCK_CONFIG',
     });
 
@@ -77,7 +78,6 @@ export default class AmazonBedrockProvider extends BaseProvider {
 
     const config = this._parseAndValidateConfig(apiKey);
     const bedrock = createAmazonBedrock(config);
-    headers: { 'anthropic-beta': 'output-128k-2025-02-19' },
 
     return bedrock(model);
   }
