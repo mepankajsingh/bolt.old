@@ -25,6 +25,7 @@ export default class AmazonBedrockProvider extends BaseProvider {
       label: 'Claude 3.7 Sonnet (Bedrock)',
       provider: 'AmazonBedrock',
       maxTokenAllowed: 4096,
+    }
   ];
 
   private _parseAndValidateConfig(apiKey: string): AWSBedRockConfig {
