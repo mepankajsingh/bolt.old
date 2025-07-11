@@ -11,6 +11,7 @@ import type { ContextAnnotation, ProgressAnnotation } from '~/types/context';
 import { WORK_DIR } from '~/utils/constants';
 import { createSummary } from '~/lib/.server/llm/create-summary';
 import { extractPropertiesFromMessage } from '~/lib/.server/llm/utils';
+import type { DesignScheme } from '~/types/design-scheme';
 
 export async function action(args: ActionFunctionArgs) {
   return chatAction(args);
@@ -37,11 +38,13 @@ function parseCookies(cookieHeader: string): Record<string, string> {
 }
 
 async function chatAction({ context, request }: ActionFunctionArgs) {
-  const { messages, files, promptId, contextOptimization, supabase } = await request.json<{
+  const { messages, files, promptId, contextOptimization, supabase, chatMode, designScheme } = await request.json<{
     messages: Messages;
     files: any;
     promptId?: string;
     contextOptimization: boolean;
+    chatMode: 'discuss' | 'build';
+    designScheme?: DesignScheme;
     supabase?: {
       isConnected: boolean;
       hasSelectedProject: boolean;
@@ -248,6 +251,8 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
               promptId,
               contextOptimization,
               contextFiles: filteredFiles,
+              chatMode,
+              designScheme,
               summary,
               messageSliceId,
             });
@@ -287,6 +292,8 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
           promptId,
           contextOptimization,
           contextFiles: filteredFiles,
+          chatMode,
+          designScheme,
           summary,
           messageSliceId,
         });
@@ -354,16 +361,34 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
   } catch (error: any) {
     logger.error(error);
 
+    const errorResponse = {
+      error: true,
+      message: error.message || 'An unexpected error occurred',
+      statusCode: error.statusCode || 500,
+      isRetryable: error.isRetryable !== false, // Default to retryable unless explicitly false
+      provider: error.provider || 'unknown',
+    };
+
     if (error.message?.includes('API key')) {
-      throw new Response('Invalid or missing API key', {
-        status: 401,
-        statusText: 'Unauthorized',
-      });
+      return new Response(
+        JSON.stringify({
+          ...errorResponse,
+          message: 'Invalid or missing API key',
+          statusCode: 401,
+          isRetryable: false,
+        }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+          statusText: 'Unauthorized',
+        },
+      );
     }
 
-    throw new Response(null, {
-      status: 500,
-      statusText: 'Internal Server Error',
+    return new Response(JSON.stringify(errorResponse), {
+      status: errorResponse.statusCode,
+      headers: { 'Content-Type': 'application/json' },
+      statusText: 'Error',
     });
   }
 }
