@@ -6,7 +6,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 
 export default class AnthropicProvider extends BaseProvider {
   name = 'Anthropic';
-  getApiKeyLink = 'https://console.anthropic.com/settings/keys';
+  getApiKeyLink = 'https://agentrouter.org/v1';
 
   config = {
     apiTokenKey: 'ANTHROPIC_API_KEY',
@@ -18,30 +18,12 @@ export default class AnthropicProvider extends BaseProvider {
      * Claude 3.5 Sonnet: 200k context, excellent for complex reasoning and coding
      */
     {
-      name: 'claude-3-5-sonnet-20241022',
-      label: 'Claude 3.5 Sonnet',
+      name: 'claude-sonnet-4-5-20250929',
+      label: 'Claude 4.5 Sonnet',
       provider: 'Anthropic',
       maxTokenAllowed: 200000,
       maxCompletionTokens: 128000,
-    },
-
-    // Claude 3 Haiku: 200k context, fastest and most cost-effective
-    {
-      name: 'claude-3-haiku-20240307',
-      label: 'Claude 3 Haiku',
-      provider: 'Anthropic',
-      maxTokenAllowed: 200000,
-      maxCompletionTokens: 128000,
-    },
-
-    // Claude Opus 4: 200k context, 32k output limit (latest flagship model)
-    {
-      name: 'claude-opus-4-20250514',
-      label: 'Claude 4 Opus',
-      provider: 'Anthropic',
-      maxTokenAllowed: 200000,
-      maxCompletionTokens: 32000,
-    },
+    }
   ];
 
   async getDynamicModels(
@@ -64,7 +46,7 @@ export default class AnthropicProvider extends BaseProvider {
     const response = await fetch(`https://api.anthropic.com/v1/models`, {
       headers: {
         'x-api-key': `${apiKey}`,
-        'anthropic-version': '2023-06-01',
+        'anthropic-version': '2025-09-29',
       },
     });
 
