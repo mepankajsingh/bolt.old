@@ -34,7 +34,7 @@ export default class TogetherProvider extends BaseProvider {
       defaultBaseUrlKey: 'ANTHROPIC_BASE_URL',
       defaultApiTokenKey: 'ANTHROPIC_API_KEY',
     });
-    const baseUrl = fetchBaseUrl || 'https://agentrouter.org/v1';
+    const baseUrl = fetchBaseUrl || 'https://agentrouter.org/';
 
     if (!baseUrl || !apiKey) {
       return [];
@@ -42,7 +42,7 @@ export default class TogetherProvider extends BaseProvider {
 
     // console.log({ baseUrl, apiKey });
 
-    const response = await fetch(`${baseUrl}/models`, {
+    const response = await fetch(`${baseUrl}/v1beta/models`, {
       headers: {
         Authorization: `Bearer ${apiKey}`,
       },
