@@ -1,9 +1,16 @@
+// ~/lib/modules/llm/providers/together-provider.ts
 import { BaseProvider, getOpenAILikeModel } from '~/lib/modules/llm/base-provider';
 import type { ModelInfo } from '~/lib/modules/llm/types';
 import type { IProviderSetting } from '~/types/model';
 import type { LanguageModelV1 } from 'ai';
 
+type ServerEnv = Record<string, string>;
+
+/**
+ * AgentRouter provider wrapper
+ */
 export default class TogetherProvider extends BaseProvider {
+  // provider name (use a plain string here to be safe in field initializers)
   name = 'AgentRouter';
   getApiKeyLink = 'https://agentrouter.org/';
 
@@ -12,21 +19,24 @@ export default class TogetherProvider extends BaseProvider {
     apiTokenKey: 'ANTHROPIC_API_KEY',
   };
 
-  // made provider consistent with this.name
+  // Keep a static model example (provider set to the provider name)
   staticModels: ModelInfo[] = [
     {
       name: 'claude-sonnet-4-5-20250929',
       label: 'Claude Sonnet 4.5',
-      provider: this.name,
+      provider: 'AgentRouter',
       maxTokenAllowed: 200000,
       maxCompletionTokens: 8192,
-    }
+    },
   ];
 
+  /**
+   * Fetch dynamic models from AgentRouter (v1beta /v1 depending on API)
+   */
   async getDynamicModels(
     apiKeys?: Record<string, string>,
     settings?: IProviderSetting,
-    serverEnv: Record<string, string> = {},
+    serverEnv: ServerEnv = {},
   ): Promise<ModelInfo[]> {
     const { baseUrl: fetchBaseUrl, apiKey } = this.getProviderBaseUrlAndKey({
       apiKeys,
@@ -35,40 +45,77 @@ export default class TogetherProvider extends BaseProvider {
       defaultBaseUrlKey: 'ANTHROPIC_BASE_URL',
       defaultApiTokenKey: 'ANTHROPIC_API_KEY',
     });
-    const baseUrl = fetchBaseUrl || 'https://agentrouter.org/';
 
-    if (!baseUrl || !apiKey) {
-      return [];
+    // Fallback sensible defaults
+    const baseUrl = (fetchBaseUrl && String(fetchBaseUrl).trim()) || serverEnv.ANTHROPIC_BASE_URL || 'https://agentrouter.org/';
+    const key = apiKey || serverEnv.ANTHROPIC_API_KEY || serverEnv.AGENTROUTER_API_KEY || apiKeys?.[this.name] || apiKeys?.ANTHROPIC_API_KEY;
+
+    if (!baseUrl || !key) {
+      // No credentials -> return static models only (or empty list)
+      return this.staticModels || [];
     }
 
-    let resJson: any;
-    try {
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1beta/models`, {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: 'application/json',
-        },
-      });
+    // Try multiple candidate endpoints and header styles (Authorization Bearer, x-api-key)
+    const endpoints = [
+      `${baseUrl.replace(/\/$/, '')}/v1beta/models`,
+      `${baseUrl.replace(/\/$/, '')}/v1/models`,
+      `${baseUrl.replace(/\/$/, '')}/models`,
+    ];
 
-      if (!response.ok) {
-        // if non-2xx, try to parse body for debug but return []
-        try {
-          resJson = await response.json();
-          // optional: console.warn('AgentRouter models fetch non-OK:', response.status, resJson);
-        } catch {
-          // console.warn('AgentRouter models fetch non-OK and body not json', response.statusText);
+    let resJson: any = null;
+    for (const url of endpoints) {
+      try {
+        const resp = await fetch(url, {
+          headers: {
+            // primary common header
+            Authorization: `Bearer ${key}`,
+            Accept: 'application/json',
+          },
+        });
+
+        // if 401/403, try alternate header style once
+        if (resp.status === 401 || resp.status === 403) {
+          // try x-api-key style
+          const alt = await fetch(url, {
+            headers: { 'x-api-key': key, Accept: 'application/json' },
+          });
+          if (alt.ok) {
+            try {
+              resJson = await alt.json();
+              break;
+            } catch {
+              continue;
+            }
+          } else {
+            continue;
+          }
         }
-        return [];
-      }
 
-      resJson = await response.json();
-    } catch (err) {
-      // network / parse error
-      // console.error('Failed to fetch AgentRouter models', err);
-      return [];
+        if (!resp.ok) {
+          // not ok -> continue to next endpoint
+          continue;
+        }
+
+        try {
+          resJson = await resp.json();
+          break;
+        } catch (e) {
+          // parse error -> continue
+          continue;
+        }
+      } catch (e) {
+        // network error -> try next endpoint
+        continue;
+      }
     }
 
-    // AgentRouter may return: an array, or { models: [...] } or { data: [...] }
+    if (!resJson) {
+      // nothing fetched — return static models to avoid empty UX
+      return this.staticModels || [];
+    }
+
+    // Normalize response shapes:
+    // possible shapes: Array, { models: [...] }, { data: [...] }, { result: [...] }, { items: [...] }
     let rawModels: any[] = [];
     if (Array.isArray(resJson)) {
       rawModels = resJson;
@@ -76,79 +123,142 @@ export default class TogetherProvider extends BaseProvider {
       rawModels = resJson.models;
     } else if (Array.isArray(resJson.data)) {
       rawModels = resJson.data;
+    } else if (Array.isArray(resJson.result)) {
+      rawModels = resJson.result;
+    } else if (Array.isArray(resJson.items)) {
+      rawModels = resJson.items;
     } else {
-      // unknown shape
-      rawModels = [];
+      // try to find an array anywhere in the object
+      const maybeArray = Object.values(resJson).find((v) => Array.isArray(v));
+      if (Array.isArray(maybeArray)) rawModels = maybeArray as any[];
     }
 
-    // filter only chat-like models, but be defensive if `type` missing
+    if (!Array.isArray(rawModels) || rawModels.length === 0) {
+      return this.staticModels || [];
+    }
+
+    // Filter chat-like models defensively
     const chatModels = rawModels.filter((m: any) => {
       if (!m) return false;
-      if (typeof m.type === 'string') return m.type === 'chat';
-      // sometimes model ids or names imply chat
-      const idOrName = `${m.id || m.name || ''}`.toLowerCase();
-      return idOrName.includes('chat') || idOrName.includes('claude') || idOrName.includes('sonnet');
+      if (typeof m.type === 'string') return m.type.toLowerCase() === 'chat';
+      const id = String(m.id || m.name || '').toLowerCase();
+      return id.includes('chat') || id.includes('claude') || id.includes('sonnet') || id.includes('assistant');
     });
 
-    // map & guard fields
-    const mapped = chatModels.map((m: any) => {
-      const id = m.id || m.model_id || m.name;
-      const displayName = m.display_name || m.name || id || 'unknown';
-      // pricing may be missing or have different shapes; guard it
-      let priceLabel = '';
+    const mapped: ModelInfo[] = chatModels.map((m: any) => {
+      const id = m.id || m.model_id || m.name || (m._id && String(m._id));
+      const display = m.display_name || m.name || id || 'unknown-model';
+
+      let pricePart = '';
       try {
         if (m.pricing && typeof m.pricing.input === 'number' && typeof m.pricing.output === 'number') {
-          priceLabel = ` - in:$${m.pricing.input.toFixed(2)} out:$${m.pricing.output.toFixed(2)}`;
-        } else if (m.price && typeof m.price === 'number') {
-          priceLabel = ` - $${m.price.toFixed(4)}`;
+          pricePart = ` - in:$${m.pricing.input.toFixed(2)} out:$${m.pricing.output.toFixed(2)}`;
+        } else if (typeof m.price === 'number') {
+          pricePart = ` - $${m.price.toFixed(4)}`;
         }
       } catch {
-        priceLabel = '';
+        pricePart = '';
       }
 
-      const ctx = Number.isFinite(m.context_length) ? Number(m.context_length) : undefined;
+      const ctx = Number.isFinite(m.context_length) ? Number(m.context_length) : (Number.isFinite(m.context) ? Number(m.context) : undefined);
       const ctxLabel = ctx ? ` - context ${Math.floor(ctx / 1000)}k` : '';
 
       const maxTokenAllowed = ctx ?? 8000;
+      const maxCompletionTokens = Math.min(8192, maxTokenAllowed || 8192);
+
+      const label = `${display}${pricePart}${ctxLabel}`;
 
       return {
         name: id,
-        label: `${displayName}${priceLabel}${ctxLabel}`,
+        label,
         provider: this.name,
         maxTokenAllowed,
-        maxCompletionTokens: Math.min(8192, maxTokenAllowed || 8192),
-        raw: m, // optional: keep raw object for debugging if needed
-      } as ModelInfo;
+        maxCompletionTokens,
+        // keep raw model for debugging if needed
+        raw: m as any,
+      } as unknown as ModelInfo;
     });
 
-    // dedupe by name/id
+    // dedupe by name
     const unique = new Map<string, ModelInfo>();
     for (const mi of mapped) {
-      if (!mi.name) continue;
+      if (!mi || !mi.name) continue;
       if (!unique.has(mi.name)) unique.set(mi.name, mi);
     }
 
-    return Array.from(unique.values());
+    const dynamic = Array.from(unique.values());
+
+    // If nothing discovered, return static models (fallback)
+    return dynamic.length ? dynamic : this.staticModels || [];
   }
 
+  /**
+   * Create a model instance. This method is tolerant to multiple ways credentials can be provided.
+   */
   getModelInstance(options: {
     model: string;
-    serverEnv: Env;
+    serverEnv: ServerEnv;
     apiKeys?: Record<string, string>;
     providerSettings?: Record<string, IProviderSetting>;
   }): LanguageModelV1 {
-    const { model, serverEnv, apiKeys, providerSettings } = options;
+    const { model, serverEnv = {}, apiKeys = {}, providerSettings = {} } = options;
 
-    const { baseUrl, apiKey } = this.getProviderBaseUrlAndKey({
-      apiKeys,
-      providerSettings: providerSettings?.[this.name],
-      serverEnv: serverEnv as any,
-      defaultBaseUrlKey: 'ANTHROPIC_BASE_URL',
-      defaultApiTokenKey: 'ANTHROPIC_API_KEY',
-    });
+    // Try existing BaseProvider helper first, but fall back to multiple candidates
+    const tryBaseProvider = () => {
+      try {
+        return this.getProviderBaseUrlAndKey({
+          apiKeys,
+          providerSettings: providerSettings?.[this.name],
+          serverEnv: serverEnv as any,
+          defaultBaseUrlKey: 'ANTHROPIC_BASE_URL',
+          defaultApiTokenKey: 'ANTHROPIC_API_KEY',
+        });
+      } catch {
+        return { baseUrl: '', apiKey: '' };
+      }
+    };
+
+    const primary = tryBaseProvider();
+    let baseUrl = primary.baseUrl || '';
+    let apiKey = primary.apiKey || '';
+
+    // Fallbacks
+    if (!apiKey) {
+      apiKey =
+        apiKeys[this.name] ||
+        apiKeys.ANTHROPIC_API_KEY ||
+        apiKeys.AGENTROUTER_API_KEY ||
+        serverEnv.ANTHROPIC_API_KEY ||
+        serverEnv.AGENTROUTER_API_KEY ||
+        (providerSettings?.[this.name] as any)?.apiKey ||
+        (providerSettings?.['Anthropic'] as any)?.apiKey ||
+        '';
+    }
+
+    if (!baseUrl) {
+      baseUrl =
+        primary.baseUrl ||
+        (providerSettings?.[this.name] as any)?.baseUrl ||
+        (providerSettings?.[this.name] as any)?.base_url ||
+        serverEnv.ANTHROPIC_BASE_URL ||
+        serverEnv.AGENTROUTER_BASE_URL ||
+        process.env?.ANTHROPIC_BASE_URL ||
+        'https://agentrouter.org/';
+    }
 
     if (!baseUrl || !apiKey) {
-      throw new Error(`Missing configuration for ${this.name} provider`);
+      // Provide detailed guidance in the error to help debug
+      throw new Error(
+        `Missing configuration for ${this.name} provider. Unable to find a baseUrl and/or apiKey. Tried:
+- providerSettings['${this.name}'], providerSettings['Anthropic']
+- apiKeys['${this.name}'], apiKeys['ANTHROPIC_API_KEY'], apiKeys['AGENTROUTER_API_KEY']
+- serverEnv.ANTHROPIC_API_KEY, serverEnv.AGENTROUTER_API_KEY, serverEnv.ANTHROPIC_BASE_URL
+Please pass credentials in one of those places. Example:
+providerSettings = {
+  "${this.name}": { apiKey: "<KEY>", baseUrl: "https://agentrouter.org/" }
+}
+Or set environment variables ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL.`
+      );
     }
 
     return getOpenAILikeModel(baseUrl, apiKey, model);
