@@ -4,35 +4,22 @@ import type { IProviderSetting } from '~/types/model';
 import type { LanguageModelV1 } from 'ai';
 
 export default class TogetherProvider extends BaseProvider {
-  name = 'Together';
-  getApiKeyLink = 'https://api.together.xyz/settings/api-keys';
+  name = 'AgentRouter';
+  getApiKeyLink = 'https://agentrouter.org/';
 
   config = {
-    baseUrlKey: 'TOGETHER_API_BASE_URL',
-    apiTokenKey: 'TOGETHER_API_KEY',
+    baseUrlKey: 'ANTHROPIC_BASE_URL',
+    apiTokenKey: 'ANTHROPIC_API_KEY',
   };
 
   staticModels: ModelInfo[] = [
-    /*
-     * Essential fallback models - only the most stable/reliable ones
-     * Llama 3.2 90B Vision: 128k context, multimodal capabilities
-     */
     {
-      name: 'meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo',
-      label: 'Llama 3.2 90B Vision',
-      provider: 'Together',
-      maxTokenAllowed: 128000,
+      name: 'claude-sonnet-4-5-20250929',
+      label: 'Claude Sonnet 4.5',
+      provider: 'Anthropic',
+      maxTokenAllowed: 200000,
       maxCompletionTokens: 8192,
-    },
-
-    // Mixtral 8x7B: 32k context, strong performance
-    {
-      name: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
-      label: 'Mixtral 8x7B Instruct',
-      provider: 'Together',
-      maxTokenAllowed: 32000,
-      maxCompletionTokens: 8192,
-    },
+    }
   ];
 
   async getDynamicModels(
@@ -44,10 +31,10 @@ export default class TogetherProvider extends BaseProvider {
       apiKeys,
       providerSettings: settings,
       serverEnv,
-      defaultBaseUrlKey: 'TOGETHER_API_BASE_URL',
-      defaultApiTokenKey: 'TOGETHER_API_KEY',
+      defaultBaseUrlKey: 'ANTHROPIC_BASE_URL',
+      defaultApiTokenKey: 'ANTHROPIC_API_KEY',
     });
-    const baseUrl = fetchBaseUrl || 'https://api.together.xyz/v1';
+    const baseUrl = fetchBaseUrl || 'https://agentrouter.org/v1';
 
     if (!baseUrl || !apiKey) {
       return [];
@@ -85,8 +72,8 @@ export default class TogetherProvider extends BaseProvider {
       apiKeys,
       providerSettings: providerSettings?.[this.name],
       serverEnv: serverEnv as any,
-      defaultBaseUrlKey: 'TOGETHER_API_BASE_URL',
-      defaultApiTokenKey: 'TOGETHER_API_KEY',
+      defaultBaseUrlKey: 'ANTHROPIC_BASE_URL',
+      defaultApiTokenKey: 'ANTHROPIC_API_KEY',
     });
 
     if (!baseUrl || !apiKey) {
